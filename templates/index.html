@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Road Damage & Pothole Assessment System</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; text-align: center; padding: 25px 15px; }
+        h1 { font-size: 26px; color: #38bdf8; margin-bottom: 6px; }
+        p.subtitle { color: #94a3b8; font-size: 14px; margin-bottom: 25px; }
+
+        .dashboard-cards {
+            display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 25px;
+        }
+        .card {
+            background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+            padding: 16px 20px; width: 280px; text-align: center;
+        }
+        .card h3 { font-size: 15px; margin-bottom: 12px; color: #e2e8f0; }
+
+        .btn {
+            background-color: #2563eb; color: #fff; padding: 8px 16px; border: none;
+            border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+            text-decoration: none; display: inline-block; transition: 0.2s;
+        }
+        .btn:hover { background-color: #1d4ed8; }
+        .btn-reset { background-color: #475569; }
+        .btn-reset:hover { background-color: #334155; }
+
+        input[type="file"] { display: none; }
+        .upload-label {
+            background: #334155; color: #cbd5e1; padding: 8px 14px; border-radius: 6px;
+            cursor: pointer; font-size: 13px; display: inline-block; transition: 0.2s;
+        }
+        .upload-label:hover { background: #475569; color: #fff; }
+
+        .legend-bar {
+            display: inline-flex; gap: 20px; background: #1e293b; padding: 8px 20px;
+            border-radius: 20px; margin-bottom: 20px; font-size: 13px; border: 1px solid #334155;
+        }
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot-green { background: #22c55e; }
+        .dot-blue { background: #0ea5e9; }
+        .dot-red { background: #ef4444; }
+
+        .viewer-container {
+            width: 820px; height: 480px; margin: 0 auto; background: #020617;
+            border: 2px solid #334155; border-radius: 12px; overflow: hidden;
+            display: flex; align-items: center; justify-content: center; position: relative;
+        }
+        .viewer-container img { width: 100%; height: 100%; object-fit: contain; }
+
+        .placeholder-text { color: #64748b; font-size: 15px; }
+
+        .table-section { max-width: 820px; margin: 25px auto 30px; text-align: left; }
+        table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px; font-size: 13px; text-align: center; border-bottom: 1px solid #334155; }
+        th { background: #0f172a; color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+    <h1>AI Road Damage & Pothole Assessment System</h1>
+    <p class="subtitle">Select an input modality below to perform detection &amp; spatial severity classification</p>
+
+    <!-- 3 Input Cards -->
+    <div class="dashboard-cards">
+        <!-- 1. Image Upload -->
+        <div class="card">
+            <h3>🖼️ 1. Test Road Image</h3>
+            <form action="/predict_image" method="POST" enctype="multipart/form-data">
+                <label class="upload-label" for="img-file">Select Image (.jpg / .png)</label>
+                <input type="file" id="img-file" name="image" accept="image/*" onchange="this.form.submit()" required>
+            </form>
+        </div>
+
+        <!-- 2. Video Upload & Default Video -->
+        <div class="card">
+            <h3>🎥 2. Driving Video</h3>
+            <form action="/upload_video" method="POST" enctype="multipart/form-data" style="margin-bottom: 8px;">
+                <label class="upload-label" for="vid-file">Upload New Video</label>
+                <input type="file" id="vid-file" name="video" accept="video/*" onchange="this.form.submit()" required>
+            </form>
+            <a href="{{ url_for('default_video') }}" class="btn" style="font-size: 11px; padding: 4px 10px;">Default Video</a>
+        </div>
+
+        <!-- 3. Webcam -->
+        <div class="card">
+            <h3>📹 3. Live Webcam</h3>
+            <a href="{{ url_for('start_webcam') }}" class="btn">Launch Camera</a>
+            <a href="{{ url_for('reset') }}" class="btn btn-reset" style="margin-left: 5px;">Clear</a>
+        </div>
+    </div>
+
+    <!-- Severity Classification Color Legend -->
+    <div class="legend-bar">
+        <div class="legend-item"><span class="dot dot-green"></span> Low Severity (Minor Surface)</div>
+        <div class="legend-item"><span class="dot dot-blue"></span> Medium Severity (Moderate Damage)</div>
+        <div class="legend-item"><span class="dot dot-red"></span> High Severity (Deep / Large Pothole)</div>
+    </div>
+
+    <!-- Media Display Area -->
+    <div class="viewer-container">
+        {% if mode == 'none' %}
+            <div class="placeholder-text">
+                <p style="font-weight: 600; font-size: 16px; margin-bottom: 4px;">System Cleared</p>
+                <p style="font-size: 13px;">Choose an option above to resume detection.</p>
+            </div>
+        {% elif mode == 'image' and image_result %}
+            <img src="{{ image_result }}" alt="Processed Image">
+        {% elif mode == 'video' or mode == 'webcam' %}
+            <img src="{{ url_for('video_feed') }}" alt="Live Feed">
+        {% endif %}
+    </div>
+
+    <!-- Pothole History / Assessment Table -->
+    <div class="table-section">
+        <h3 style="margin-bottom: 10px; font-size: 15px; color: #38bdf8;">Real-Time Pothole Detection History:</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Defect Type</th>
+                    <th>Confidence Score</th>
+                    <th>Assigned Severity</th>
+                </tr>
+            </thead>
+            <tbody id="detection-table-body">
+                <tr>
+                    <td colspan="4" style="color: #64748b;">Waiting for detections...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Poll for live detection updates every 800ms
+        setInterval(async () => {
+            try {
+                const res = await fetch('/get_latest_detections');
+                const data = await res.json();
+                const tbody = document.getElementById('detection-table-body');
+
+                if (data && data.length > 0) {
+                    tbody.innerHTML = data.map((item, idx) => {
+                        let color = '#22c55e'; // Green (Low)
+                        if (item.severity === 'Medium') color = '#0ea5e9'; // Blue (Medium)
+                        if (item.severity === 'High') color = '#ef4444';   // Red (High)
+
+                        return `<tr>
+                            <td>${idx + 1}</td>
+                            <td>${item.type}</td>
+                            <td>${item.confidence}</td>
+                            <td style="font-weight: bold; color: ${color};">${item.severity}</td>
+                        </tr>`;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }, 800);
+    </script>
+
+</body>
+</html>
