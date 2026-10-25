@@ -2,18 +2,20 @@ import os
 import threading
 import time
 
-# Prevent Windows Media Foundation enumeration freeze
+# Prevent Linux/Windows backend video enumeration hangs & memory leaks
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 import cv2
 import numpy as np
+import torch
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 from ultralytics import YOLO
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# Absolute paths
+# Base paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'best.pt')
 DEFAULT_VIDEO = os.path.join(BASE_DIR, 'sample_video.mp4')
@@ -23,13 +25,14 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Load YOLO model
 model = YOLO(MODEL_PATH)
 
-current_mode = 'video'
-active_video_path = DEFAULT_VIDEO
+# Start in idle state ('none') so Render does not crash from auto-running video on boot
+current_mode = 'none'
+active_video_path = None
 latest_detections = []
 
 
 class ThreadedCamera:
-    """Threaded camera capture to avoid thread blocking/freezing on Windows"""
+    """Thread-safe camera capture for local or container environments"""
     def __init__(self):
         self.cap = None
         self.frame = None
@@ -37,9 +40,7 @@ class ThreadedCamera:
         self.lock = threading.Lock()
 
     def start(self):
-        # Index 0 fallback without Windows-only DSHOW flags
         self.cap = cv2.VideoCapture(0)
-        
         if not self.cap.isOpened():
             print("Notice: No physical webcam detected on server hardware.")
             return False
@@ -53,7 +54,7 @@ class ThreadedCamera:
         return True
 
     def update(self):
-        while not self.stopped and self.cap.isOpened():
+        while not self.stopped and self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
             if ret and frame is not None:
                 with self.lock:
@@ -78,11 +79,11 @@ camera_thread = ThreadedCamera()
 def calculate_severity(box_area, frame_area):
     ratio = (box_area / frame_area) * 100
     if ratio < 1.5:
-        return 'Low', (0, 255, 0)
+        return 'Low', (0, 255, 0)       # Green
     elif ratio < 5.0:
-        return 'Medium', (255, 165, 0)
+        return 'Medium', (255, 165, 0)  # Cyan/Blue
     else:
-        return 'High', (0, 0, 255)
+        return 'High', (0, 0, 255)      # Red
 
 
 def draw_custom_boxes(frame, results):
@@ -101,8 +102,10 @@ def draw_custom_boxes(frame, results):
             box_area = (x2 - x1) * (y2 - y1)
             severity, color = calculate_severity(box_area, frame_area)
 
+            # Draw Box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
 
+            # Draw Label Tag
             tag = f"{label_name} | {conf:.2f} | {severity}"
             (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             cv2.rectangle(frame, (x1, y1 - 25), (x1 + tw + 6, y1), color, -1)
@@ -125,17 +128,21 @@ def generate_frames():
     global current_mode, active_video_path
 
     if current_mode == 'webcam':
-        camera_thread.start()
+        success = camera_thread.start()
+        if not success:
+            return
+
         while current_mode == 'webcam':
             frame = camera_thread.read()
             if frame is None:
                 time.sleep(0.03)
                 continue
 
-            results = model(frame, conf=0.25, verbose=False)
-            annotated_frame, _ = draw_custom_boxes(frame, results)
+            with torch.no_grad():
+                results = model(frame, conf=0.25, imgsz=480, verbose=False)
 
-            ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            annotated_frame, _ = draw_custom_boxes(frame, results)
+            ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if not ret:
                 continue
 
@@ -151,10 +158,11 @@ def generate_frames():
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-            results = model(frame, conf=0.25, verbose=False)
-            annotated_frame, _ = draw_custom_boxes(frame, results)
+            with torch.no_grad():
+                results = model(frame, conf=0.25, imgsz=480, verbose=False)
 
-            ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            annotated_frame, _ = draw_custom_boxes(frame, results)
+            ret, buffer = cv2.imencode('.jpg', annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if not ret:
                 continue
 
@@ -231,7 +239,10 @@ def predict_image():
     file_bytes = np.frombuffer(file.read(), np.uint8)
     frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-    results = model(frame, conf=0.25, verbose=False)
+    # Lightweight inference inside no_grad
+    with torch.no_grad():
+        results = model(frame, conf=0.25, imgsz=640, verbose=False)
+
     annotated_frame, detections = draw_custom_boxes(frame, results)
 
     output_path = os.path.join(UPLOAD_FOLDER, 'result.jpg')

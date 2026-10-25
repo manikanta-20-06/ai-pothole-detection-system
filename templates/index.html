@@ -105,8 +105,8 @@
     <div class="viewer-container" id="viewer-container">
         {% if mode == 'none' %}
             <div class="placeholder-text">
-                <p style="font-weight: 600; font-size: 16px; margin-bottom: 4px;">System Cleared</p>
-                <p style="font-size: 13px;">Choose an option above to resume detection.</p>
+                <p style="font-weight: 600; font-size: 16px; margin-bottom: 6px; color: #38bdf8;">System Ready & Idle</p>
+                <p style="font-size: 13px;">Upload a road image, start the default video, or upload a driving video clip.</p>
             </div>
         {% elif mode == 'image' and image_result %}
             <img src="{{ image_result }}" alt="Processed Image">
@@ -136,7 +136,7 @@
     </div>
 
     <script>
-        // Poll for live detection updates every 700ms
+        // Poll for live detection updates every 1000ms
         setInterval(async () => {
             try {
                 const res = await fetch('/get_latest_detections');
@@ -160,7 +160,7 @@
             } catch (err) {
                 // Silently ignore aborted polls
             }
-        }, 700);
+        }, 1000);
     </script>
 
 </body>
