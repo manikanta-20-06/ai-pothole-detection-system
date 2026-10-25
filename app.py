@@ -37,13 +37,11 @@ class ThreadedCamera:
         self.lock = threading.Lock()
 
     def start(self):
-        # Try default driver first, then DirectShow fallback
+        # Index 0 fallback without Windows-only DSHOW flags
         self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         
         if not self.cap.isOpened():
-            print("ERROR: Could not open webcam at index 0.")
+            print("Notice: No physical webcam detected on server hardware.")
             return False
 
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -51,7 +49,6 @@ class ThreadedCamera:
         self.stopped = False
 
         threading.Thread(target=self.update, daemon=True).start()
-        # Allow hardware sensor to warm up
         time.sleep(0.5)
         return True
 
